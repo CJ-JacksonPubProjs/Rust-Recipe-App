@@ -1,7 +1,0 @@
-[package]
-name = "first-app"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-iced = { path =  "local crates/iced-0.14.0" }
