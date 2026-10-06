@@ -30,7 +30,7 @@ fn load_recipes(path: &str) -> SqlResult<Vec<Recipe>> {
 
 fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
-        .title("PantryMatch")
+        .title("Rust Recipe ProjectV")
         .run()
 }
 
@@ -56,12 +56,16 @@ impl App {
 #[derive(Debug, Clone)]
 enum Message {
     SearchChanged(String),
+    CheckboxToggled(bool),
 }
 
 impl App {
     fn update(&mut self, message: Message) {
         match message {
             Message::SearchChanged(value) => self.search = value,
+            Message::CheckboxToggled(is_checked) => {
+            self.is_checked = is_checked;
+            }
         }
     }
 
@@ -113,6 +117,11 @@ impl App {
         container(column![search_box, scrollable(list)].spacing(10).padding(20))
             .width(Length::Fill)
             .height(Length::Fill)
+            .into();
+
+        checkbox(self.is_checked)
+            .label("Toggle me!")
+            .on_toggle(Message::CheckboxToggled)
             .into()
     }
 }
