@@ -1,4 +1,4 @@
-use iced::widget::{column, container, scrollable, text, text_input};
+use iced::widget::{Checkbox, checkbox, column, container, scrollable, text, text_input};
 use iced::{Element, Length};
 use rusqlite::{Connection, Result as SqlResult};
 
@@ -37,6 +37,7 @@ fn main() -> iced::Result {
 struct App {
     recipes: Vec<Recipe>,
     search: String,
+    is_checked: bool,
 }
 
 impl App {
@@ -49,6 +50,7 @@ impl App {
         Self {
             recipes,
             search: String::new(),
+            is_checked: false,
         }
     }
 }
@@ -71,6 +73,10 @@ impl App {
 
     fn view(&self) -> Element<'_, Message> {
         let query = self.search.to_lowercase();
+        
+        let my_checkbox = Checkbox::new(self.is_checked)
+            .label("message")
+            .on_toggle(Message::CheckboxToggled);
 
         let matches: Vec<&Recipe> = self
             .recipes
@@ -114,14 +120,9 @@ impl App {
             );
         }
 
-        container(column![search_box, scrollable(list)].spacing(10).padding(20))
+        container(column![search_box, scrollable(list), my_checkbox].spacing(10).padding(20))
             .width(Length::Fill)
             .height(Length::Fill)
-            .into();
-
-        checkbox(self.is_checked)
-            .label("Toggle me!")
-            .on_toggle(Message::CheckboxToggled)
             .into()
     }
 }
