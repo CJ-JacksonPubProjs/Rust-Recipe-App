@@ -110,8 +110,8 @@ impl App {
         let query = self.search.to_lowercase();
 
         let arrow_icon = image(image::Handle::from_path("assets/arrow.png"))
-            .width(Length::Fixed(24.0))
-            .height(Length::Fixed(24.0));
+            .width(Length::Fixed(48.0))
+            .height(Length::Fixed(48.0));
 
         let advanced_toggle = button(arrow_icon)
             .on_press(Message::ToggleAdvanced)
