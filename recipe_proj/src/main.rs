@@ -12,21 +12,21 @@ const COMMON_INGREDIENTS: &[&str] = &[
 #[derive(Debug, Clone)]
 struct Recipe {
     id: i32,
-    title: String,
+    name: String,
     ingredients: String,
     instructions: String,
 }
 
 fn load_recipes(path: &str) -> SqlResult<Vec<Recipe>> {
     let conn = Connection::open(path)?;
-    let mut stmt = conn.prepare("SELECT id, title, ingredients, instructions FROM recipes")?;
+    let mut stmt = conn.prepare("SELECT id, name, ingredients, directions FROM recipes")?;
 
     let rows = stmt.query_map([], |row| {
         Ok(Recipe {
-            id: row.get(0)?,
-            title: row.get(1)?,
-            ingredients: row.get(2)?,
-            instructions: row.get(3)?,
+            id: row.get("id")?,
+            name: row.get("name")?, // Maps SQLite column 'name' to Rust field 'title'
+            ingredients: row.get("ingredients")?,
+            instructions: row.get("directions")?,
         })
     })?;
 
@@ -35,7 +35,7 @@ fn load_recipes(path: &str) -> SqlResult<Vec<Recipe>> {
 
 fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
-        .title("Rust Recipe ProjectV")
+        .title("Rust Recipe Project")
         .theme(Theme::TokyoNight )
         .run()
 }
@@ -47,11 +47,12 @@ struct App {
     included: HashSet<String>,
     excluded: HashSet<String>,
     selected: Option<i32>,
+    current_view: usize,
 }
 
 impl App {
     fn new() -> Self {
-        let recipes = load_recipes("13k-recipes.db").unwrap_or_else(|err| {
+        let recipes = load_recipes("recipes.sqlite").unwrap_or_else(|err| {
             eprintln!("Failed to load recipes: {err}");
             Vec::new()
         });
@@ -62,7 +63,8 @@ impl App {
             show_advanced: false,
             included: HashSet::new(),
             excluded: HashSet::new(),
-            selected: None,            
+            selected: None,  
+            current_view: MAX_RESULTS,          
         }
     }
 }
@@ -75,17 +77,21 @@ enum Message {
     ExcludeToggled(String, bool),
     RecipeSelected(i32),
     BackToResults,
+    Next,
+    Back,
 }
 
 impl App {
     fn update(&mut self, message: Message) {
         match message {
-            Message::SearchChanged(value) => {
-            self.search = value;
-            self.selected = None;
+            Message::SearchChanged(value) => 
+            {
+                self.search = value;
+                self.selected = None;
             }
             Message::ToggleAdvanced => self.show_advanced = !self.show_advanced,
-            Message::IncludeToggled(name, checked) => {
+            Message::IncludeToggled(name, checked) => 
+            {
                 if checked {
                     self.excluded.remove(&name);
                     self.included.insert(name);
@@ -93,7 +99,8 @@ impl App {
                     self.included.remove(&name);
                 }
             }
-            Message::ExcludeToggled(name, checked) => {
+            Message::ExcludeToggled(name, checked) => 
+            {
                 if checked {
                     self.included.remove(&name);
                     self.excluded.insert(name);
@@ -103,6 +110,14 @@ impl App {
             }
             Message::RecipeSelected(id) => self.selected = Some(id),
             Message::BackToResults => self.selected = None,
+            Message::Next =>
+            {
+                self.current_view += MAX_RESULTS;
+            }
+            Message::Back =>
+            {
+                self.current_view -= MAX_RESULTS;
+            }
         }
     }
 
@@ -117,12 +132,17 @@ impl App {
             .on_press(Message::ToggleAdvanced)
             .style(button::text);
 
-        let matches: Vec<&Recipe> = self
+        // Collect all matching recipes first to know the total match count
+        let all_matches: Vec<&Recipe> = self
             .recipes
             .iter()
             .filter(|r| self.recipe_matches(r, &query))
-            .take(MAX_RESULTS)
             .collect();
+
+        let total_matches = all_matches.len();
+
+        // Take only up to page_limit items for display
+        let visible_matches = all_matches.into_iter().take(self.current_view);
 
         let search_box = text_input("Search by title or ingredient...", &self.search)
             .on_input(Message::SearchChanged)
@@ -148,12 +168,21 @@ impl App {
 
         for recipe in matches {
             list = list.push(
-            button(text(recipe.title.as_str()).size(18))
+            button(text(recipe.name.as_str()).size(18))
                 .on_press(Message::RecipeSelected(recipe.id))
                 .width(Length::Fill)
                 .style(button::secondary),
             );
         }
+
+        if self.page_limit < total_matches {
+        
+        let view_more_btn = button(text("Next").size(16))
+            .on_press(Message::Next)
+            .width(Length::Fill)
+            .style(button::text);
+
+        list = list.push(view_more_btn);
         
         let mut body = row![].spacing(10);
         if self.show_advanced {
@@ -172,7 +201,7 @@ impl App {
     }
 
     fn recipe_matches(&self, recipe: &Recipe, query: &str) -> bool {
-        let title = recipe.title.to_lowercase();
+        let title = recipe.name.to_lowercase();
         let ingredients = recipe.ingredients.to_lowercase();
 
         let text_ok = query.is_empty() || title.contains(query) || ingredients.contains(query);
@@ -211,7 +240,7 @@ impl App {
 
         let content = match self.recipes.iter().find(|r| r.id == id) {
             Some(recipe) => column![
-                text(recipe.title.as_str()).size(26),
+                text(recipe.name.as_str()).size(26),
                 text("Ingredients").size(18),
                 text(recipe.ingredients.as_str()).size(14),
                 text("Instructions").size(18),
