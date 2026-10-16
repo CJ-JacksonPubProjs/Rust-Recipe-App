@@ -1,13 +1,16 @@
 use iced::widget::{Checkbox, checkbox, column, container, scrollable, text, text_input, button, image, row};
-use iced::{Element, Length, Theme};
+use iced::{Element, Length, Theme, Task};
+use iced::widget::operation::{self, RelativeOffset};
 use rusqlite::{Connection, Result as SqlResult};
 use std::collections::HashSet;
 
 const MAX_RESULTS: usize = 50;
-const COMMON_INGREDIENTS: &[&str] = &[
-    "chicken", "beef", "pork", "egg", "milk", "butter",
-    "garlic", "onion", "tomato", "cheese", "flour", "rice",
-];
+
+const RESULTS_ID: &str = "results";
+
+fn scroll_to_top() -> Task<Message> {
+    operation::snap_to(RESULTS_ID, RelativeOffset::START)
+}
 
 #[derive(Debug, Clone)]
 struct Recipe {
@@ -15,18 +18,33 @@ struct Recipe {
     name: String,
     ingredients: String,
     instructions: String,
+    tags: String,
+    // lowercase copies, used only for searching
+    name_lc: String,
+    ingredients_lc: String,
+    tags_lc: String,
 }
+
 
 fn load_recipes(path: &str) -> SqlResult<Vec<Recipe>> {
     let conn = Connection::open(path)?;
-    let mut stmt = conn.prepare("SELECT id, name, ingredients, directions FROM recipes")?;
+    let mut stmt =
+        conn.prepare("SELECT id, name, ingredients, directions, tags FROM recipes")?;
 
     let rows = stmt.query_map([], |row| {
+        let name: String = row.get("name")?;
+        let ingredients: String = row.get("ingredients")?;
+        let tags: String = row.get::<_, Option<String>>("tags")?.unwrap_or_default();
+
         Ok(Recipe {
             id: row.get("id")?,
-            name: row.get("name")?, // Maps SQLite column 'name' to Rust field 'title'
-            ingredients: row.get("ingredients")?,
             instructions: row.get("directions")?,
+            name_lc: name.to_lowercase(),
+            ingredients_lc: ingredients.to_lowercase(),
+            tags_lc: tags.to_lowercase(),
+            name,
+            ingredients,
+            tags,
         })
     })?;
 
@@ -47,7 +65,10 @@ struct App {
     included: HashSet<String>,
     excluded: HashSet<String>,
     selected: Option<i32>,
-    current_view: usize,
+    page: usize,
+    include_input: String,
+    exclude_input: String,
+    tags_input: String,
 }
 
 impl App {
@@ -64,7 +85,10 @@ impl App {
             included: HashSet::new(),
             excluded: HashSet::new(),
             selected: None,  
-            current_view: MAX_RESULTS,          
+            page: 0,
+            include_input: String::new(),
+            exclude_input: String::new(),   
+            tags_input: String::new(),
         }
     }
 }
@@ -79,14 +103,80 @@ enum Message {
     BackToResults,
     Next,
     Back,
+    IncludeChanged(String),
+    ExcludeChanged(String),
+    TagsChanged(String), 
+}
+
+struct Filters {
+        query: String,
+        include: Vec<String>,
+        exclude: Vec<String>,
+        tags: Vec<String>,
+    }
+
+    impl Filters {
+        fn is_empty(&self) -> bool {
+            self.query.is_empty()
+                && self.include.is_empty()
+                && self.exclude.is_empty()
+                && self.tags.is_empty()
+        }
+
+        fn matches(&self, recipe: &Recipe) -> bool {
+            let text_ok = self.query.is_empty()
+                || recipe.name_lc.contains(&self.query)
+                || recipe.ingredients_lc.contains(&self.query);
+
+            let include_ok = self
+                .include
+                .iter()
+                .all(|t| recipe.ingredients_lc.contains(t.as_str()));
+
+            let exclude_ok = !self
+                .exclude
+                .iter()
+                .any(|t| recipe.ingredients_lc.contains(t.as_str()));
+
+            let tags_ok = self
+                .tags
+                .iter()
+                .all(|t| recipe.tags_lc.split(',').any(|rt| rt.trim() == t.as_str()));
+
+            text_ok && include_ok && exclude_ok && tags_ok
+        }
+}
+
+fn parse_terms(input: &str) -> Vec<String> {
+    input
+        .split(',')
+        .map(|term| term.trim().to_lowercase())
+        .filter(|term| !term.is_empty())
+        .collect()
 }
 
 impl App {
-    fn update(&mut self, message: Message) {
+    fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::SearchChanged(value) => 
             {
                 self.search = value;
+                self.selected = None;
+                self.page = 0;
+            }
+            Message::IncludeChanged(value) => {
+                self.include_input = value;
+                self.page = 0;
+                self.selected = None;
+            }
+            Message::ExcludeChanged(value) => {
+                self.exclude_input = value;
+                self.page = 0;
+                self.selected = None;
+            }
+            Message::TagsChanged(value) => {
+                self.tags_input = value;
+                self.page = 0;
                 self.selected = None;
             }
             Message::ToggleAdvanced => self.show_advanced = !self.show_advanced,
@@ -112,17 +202,30 @@ impl App {
             Message::BackToResults => self.selected = None,
             Message::Next =>
             {
-                self.current_view += MAX_RESULTS;
+                self.page += 1;
+                return scroll_to_top();
             }
             Message::Back =>
             {
-                self.current_view -= MAX_RESULTS;
+                self.page = self.page.saturating_sub(1);
+                return scroll_to_top();
             }
         }
+        Task::none()
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let query = self.search.to_lowercase();
+        let filters = Filters {
+            query: self.search.to_lowercase(),
+            include: parse_terms(&self.include_input),
+            exclude: parse_terms(&self.exclude_input),
+            tags: parse_terms(&self.tags_input),
+        };
+        let all_matches: Vec<&Recipe> = self
+            .recipes
+            .iter()
+            .filter(|r| filters.matches(r))
+            .collect();
 
         let arrow_icon = image(image::Handle::from_path("assets/arrow.png"))
             .width(Length::Fixed(48.0))
@@ -132,18 +235,17 @@ impl App {
             .on_press(Message::ToggleAdvanced)
             .style(button::text);
 
-        // Collect all matching recipes first to know the total match count
-        let all_matches: Vec<&Recipe> = self
-            .recipes
-            .iter()
-            .filter(|r| self.recipe_matches(r, &query))
-            .collect();
-
         let total_matches = all_matches.len();
 
-        // Take only up to page_limit items for display
-        let visible_matches = all_matches.into_iter().take(self.current_view);
+        let start = self.page * MAX_RESULTS;
+        let has_next = start + MAX_RESULTS < total_matches;
+        let total_pages = total_matches.div_ceil(MAX_RESULTS).max(1);
 
+        let page_items: Vec<&Recipe> = all_matches
+            .into_iter()
+            .skip(start)
+            .take(MAX_RESULTS)
+            .collect();
         let search_box = text_input("Search by title or ingredient...", &self.search)
             .on_input(Message::SearchChanged)
             .padding(10)
@@ -153,20 +255,20 @@ impl App {
 
         let mut list = column![].spacing(16).padding(20);
 
-        if self.search.is_empty() && self.included.is_empty() && self.excluded.is_empty() {
+        if filters.is_empty() {
             list = list.push(
                 text(format!(
                     "{} recipes loaded — type to search ({} shown)",
                     self.recipes.len(),
-                    matches.len()
+                    page_items.len()
                 ))
                 .size(14),
             );
         } else {
-            list = list.push(text(format!("{} matches", matches.len())).size(14));
+            list = list.push(text(format!("{} matches", total_matches)).size(14));
         }
 
-        for recipe in matches {
+        for recipe in page_items {
             list = list.push(
             button(text(recipe.name.as_str()).size(18))
                 .on_press(Message::RecipeSelected(recipe.id))
@@ -175,22 +277,26 @@ impl App {
             );
         }
 
-        if self.page_limit < total_matches {
-        
-        let view_more_btn = button(text("Next").size(16))
-            .on_press(Message::Next)
-            .width(Length::Fill)
-            .style(button::text);
+        let nav = row![
+            button(text("Previous")).on_press_maybe((self.page > 0).then_some(Message::Back)),
+            text(format!("Page {} of {}", self.page + 1, total_pages)),
+            button(text("Next")).on_press_maybe(has_next.then_some(Message::Next)),
+        ]
+        .spacing(10);
 
-        list = list.push(view_more_btn);
-        
         let mut body = row![].spacing(10);
         if self.show_advanced {
             body = body.push(self.advanced_panel());
         }
         let results: Element<'_, Message> = match self.selected {
             Some(id) => self.recipe_detail(id),
-            None => scrollable(list).width(Length::Fill).into(),
+            None => column![
+                scrollable(list).id(RESULTS_ID).width(Length::Fill).height(Length::Fill),
+                nav,
+            ]
+        .spacing(10)
+        .width(Length::Fill)
+        .into(),
         };
         body = body.push(results);
 
@@ -212,28 +318,36 @@ impl App {
     }
 
     fn advanced_panel(&self) -> Element<'_, Message> {
-        let mut rows = column![text("Advanced search").size(18)].spacing(8);
+        let include = text_input("e.g. chicken, garlic", &self.include_input)
+            .on_input(Message::IncludeChanged)
+            .padding(8);
 
-        for &ingredient in COMMON_INGREDIENTS {
-            let include = Checkbox::new(self.included.contains(ingredient))
-                .label("Include")
-                .on_toggle(move |on| Message::IncludeToggled(ingredient.to_string(), on));
+        let exclude = text_input("e.g. mushrooms, olives", &self.exclude_input)
+            .on_input(Message::ExcludeChanged)
+            .padding(8);
 
-            let exclude: Checkbox<'_, Message> = Checkbox::new(self.excluded.contains(ingredient))
-                .label("Exclude")
-                .on_toggle(move |on| Message::ExcludeToggled(ingredient.to_string(), on));
+        let tags = text_input("e.g. vegan, dessert", &self.tags_input)
+            .on_input(Message::TagsChanged)
+            .padding(8);
 
-            rows = rows.push(
-            column![text(ingredient).size(16), row![include, exclude].spacing(16)].spacing(2),
-            );
-        }
-
-        container(scrollable(rows))
-            .padding(10)
-            .width(Length::Fixed(260.0))
-            .style(container::bordered_box)
-            .into()
+        container(
+    column![
+                text("Advanced search").size(18),
+                text("Must include").size(14),
+                include,
+                text("Must not include").size(14),
+                exclude,
+                text("Tags").size(14),
+                tags,
+            ]
+            .spacing(8),
+        )
+        .padding(10)
+        .width(Length::Fixed(260.0))
+        .style(container::bordered_box)
+        .into()
     }
+
 
     fn recipe_detail(&self, id: i32) -> Element<'_, Message> {
         let back = button(text("Back to results")).on_press(Message::BackToResults);
@@ -245,6 +359,8 @@ impl App {
                 text(recipe.ingredients.as_str()).size(14),
                 text("Instructions").size(18),
                 text(recipe.instructions.as_str()).size(14),
+                text("Tags").size(18),
+                text(recipe.tags.as_str()).size(14),
             ]
             .spacing(10)
             .width(Length::Fill),
