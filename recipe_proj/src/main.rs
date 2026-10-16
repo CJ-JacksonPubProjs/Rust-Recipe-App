@@ -1,4 +1,4 @@
-use iced::widget::{Checkbox, checkbox, column, container, scrollable, text, text_input, button, image, row};
+use iced::widget::{column, container, scrollable, text, text_input, button, image, row};
 use iced::{Element, Length, Theme, Task};
 use iced::widget::operation::{self, RelativeOffset};
 use rusqlite::{Connection, Result as SqlResult};
@@ -97,8 +97,6 @@ impl App {
 enum Message {
     SearchChanged(String),
     ToggleAdvanced,
-    IncludeToggled(String, bool),
-    ExcludeToggled(String, bool),
     RecipeSelected(i32),
     BackToResults,
     Next,
@@ -141,8 +139,16 @@ struct Filters {
             let tags_ok = self
                 .tags
                 .iter()
-                .all(|t| recipe.tags_lc.split(',').any(|rt| rt.trim() == t.as_str()));
-
+                .all(|t| {
+                    recipe
+                        .tags_lc
+                        .split(',')
+                        .map(|rt| {
+                            rt.trim()
+                                .trim_matches(|c: char| c == '[' || c == ']' || c == '"' || c == '\'' || c.is_whitespace())
+                        })
+                        .any(|clean_tag| clean_tag == t.as_str())
+                    });
             text_ok && include_ok && exclude_ok && tags_ok
         }
 }
@@ -180,24 +186,6 @@ impl App {
                 self.selected = None;
             }
             Message::ToggleAdvanced => self.show_advanced = !self.show_advanced,
-            Message::IncludeToggled(name, checked) => 
-            {
-                if checked {
-                    self.excluded.remove(&name);
-                    self.included.insert(name);
-                } else {
-                    self.included.remove(&name);
-                }
-            }
-            Message::ExcludeToggled(name, checked) => 
-            {
-                if checked {
-                    self.included.remove(&name);
-                    self.excluded.insert(name);
-                } else {
-                    self.excluded.remove(&name);
-                }
-            }
             Message::RecipeSelected(id) => self.selected = Some(id),
             Message::BackToResults => self.selected = None,
             Message::Next =>
