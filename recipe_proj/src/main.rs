@@ -1,8 +1,7 @@
-use iced::widget::{column, container, scrollable, text, text_input, button, image, row};
+use iced::widget::{column, container, scrollable, text, text_input, button, row};
 use iced::{Element, Length, Theme, Task};
 use iced::widget::operation::{self, RelativeOffset};
 use rusqlite::{Connection, Result as SqlResult};
-use std::collections::HashSet;
 
 const MAX_RESULTS: usize = 50;
 
@@ -62,8 +61,6 @@ struct App {
     recipes: Vec<Recipe>,
     search: String,
     show_advanced: bool,
-    included: HashSet<String>,
-    excluded: HashSet<String>,
     selected: Option<i32>,
     page: usize,
     include_input: String,
@@ -82,8 +79,6 @@ impl App {
             recipes,
             search: String::new(),
             show_advanced: false,
-            included: HashSet::new(),
-            excluded: HashSet::new(),
             selected: None,  
             page: 0,
             include_input: String::new(),
@@ -215,13 +210,13 @@ impl App {
             .filter(|r| filters.matches(r))
             .collect();
 
-        let arrow_icon = image(image::Handle::from_path("assets/arrow.png"))
-            .width(Length::Fixed(48.0))
-            .height(Length::Fixed(48.0));
+        // let arrow_icon = image(image::Handle::from_path("assets/arrow.png"))
+        //     .width(Length::Fixed(48.0))
+        //     .height(Length::Fixed(48.0));
 
-        let advanced_toggle = button(arrow_icon)
+        let advanced_toggle = button("advanced search")
             .on_press(Message::ToggleAdvanced)
-            .style(button::text);
+            .style(button::secondary);
 
         let total_matches = all_matches.len();
 
@@ -292,17 +287,6 @@ impl App {
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
-    }
-
-    fn recipe_matches(&self, recipe: &Recipe, query: &str) -> bool {
-        let title = recipe.name.to_lowercase();
-        let ingredients = recipe.ingredients.to_lowercase();
-
-        let text_ok = query.is_empty() || title.contains(query) || ingredients.contains(query);
-        let included_ok = self.included.iter().all(|i| ingredients.contains(i.as_str()));
-        let excluded_ok = !self.excluded.iter().any(|e| ingredients.contains(e.as_str()));
-
-        text_ok && included_ok && excluded_ok
     }
 
     fn advanced_panel(&self) -> Element<'_, Message> {
