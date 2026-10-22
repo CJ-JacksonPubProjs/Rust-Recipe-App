@@ -6,5 +6,4 @@ edition = "2024"
 [dependencies]
 iced = { version = "0.14.0", features = ["image"] }
 tokio = { version = "1.54.0", features = ["full"] }
-tokio-rusqlite = { version = "0.8.0" }
-rusqlite = { version = "0.40.2" }
+tokio-rusqlite = { version = "0.8.0", features = ["bundled"]}
