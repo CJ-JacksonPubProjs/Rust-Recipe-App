@@ -1,11 +1,11 @@
 mod db_backend;
 
 use db_backend::{Database, Loaded, Recipe};
-use iced::widget::{button, column, container, row, scrollable, text, text_editor, text_input};use iced::{Element, Length, Theme, Task};
 use iced::widget::operation::{self, RelativeOffset};
+use iced::widget::{button, column, container, row, scrollable, text, text_editor, text_input};
+use iced::{Element, Length, Task, Theme};
 
 const MAX_RESULTS: usize = 50;
-
 const RESULTS_ID: &str = "results";
 
 fn scroll_to_top() -> Task<Message> {
@@ -15,7 +15,7 @@ fn scroll_to_top() -> Task<Message> {
 fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
         .title("Rust Recipe Project")
-        .theme(Theme::TokyoNight )
+        .theme(Theme::TokyoNight)
         .run()
 }
 
@@ -56,35 +56,6 @@ struct App {
     status: Option<String>,
 }
 
-impl App {
-    fn new() -> (Self, Task<Message>) {
-        let app = Self {
-            db: None,
-            tab: Tab::default(),
-            loading: true,
-            error: None,
-            recipes: Vec::new(),
-            my_recipes: Vec::new(),
-            search: String::new(),
-            show_advanced: false,
-            selected: None,
-            page: 0,
-            include_input: String::new(),
-            exclude_input: String::new(),
-            tags_input: String::new(),
-            selected_saved: None,
-            new_name: String::new(),
-            new_ingredients: text_editor::Content::new(),
-            new_directions: text_editor::Content::new(),
-            new_tags: String::new(),
-            status: None,
-        };
-
-        let task = Task::perform(db_backend::startup("recipes.sqlite".to_string()), Message::Loaded);
-        (app, task)
-    }
-}
-
 #[derive(Debug, Clone)]
 enum Message {
     Loaded(Result<Loaded, String>),
@@ -110,50 +81,48 @@ enum Message {
 }
 
 struct Filters {
-        query: String,
-        include: Vec<String>,
-        exclude: Vec<String>,
-        tags: Vec<String>,
+    query: String,
+    include: Vec<String>,
+    exclude: Vec<String>,
+    tags: Vec<String>,
+}
+
+impl Filters {
+    fn is_empty(&self) -> bool {
+        self.query.is_empty()
+            && self.include.is_empty()
+            && self.exclude.is_empty()
+            && self.tags.is_empty()
     }
 
-    impl Filters {
-        fn is_empty(&self) -> bool {
-            self.query.is_empty()
-                && self.include.is_empty()
-                && self.exclude.is_empty()
-                && self.tags.is_empty()
-        }
+    fn matches(&self, recipe: &Recipe) -> bool {
+        let text_ok = self.query.is_empty()
+            || recipe.name_lc.contains(&self.query)
+            || recipe.ingredients_lc.contains(&self.query);
 
-        fn matches(&self, recipe: &Recipe) -> bool {
-            let text_ok = self.query.is_empty()
-                || recipe.name_lc.contains(&self.query)
-                || recipe.ingredients_lc.contains(&self.query);
+        let include_ok = self
+            .include
+            .iter()
+            .all(|t| recipe.ingredients_lc.contains(t.as_str()));
 
-            let include_ok = self
-                .include
-                .iter()
-                .all(|t| recipe.ingredients_lc.contains(t.as_str()));
+        let exclude_ok = !self
+            .exclude
+            .iter()
+            .any(|t| recipe.ingredients_lc.contains(t.as_str()));
 
-            let exclude_ok = !self
-                .exclude
-                .iter()
-                .any(|t| recipe.ingredients_lc.contains(t.as_str()));
-
-            let tags_ok = self
-                .tags
-                .iter()
-                .all(|t| {
-                    recipe
-                        .tags_lc
-                        .split(',')
-                        .map(|rt| {
-                            rt.trim()
-                                .trim_matches(|c: char| c == '[' || c == ']' || c == '"' || c == '\'' || c.is_whitespace())
-                        })
-                        .any(|clean_tag| clean_tag == t.as_str())
-                    });
-            text_ok && include_ok && exclude_ok && tags_ok
-        }
+        let tags_ok = self.tags.iter().all(|t| {
+            recipe
+                .tags_lc
+                .split(',')
+                .map(|rt| {
+                    rt.trim().trim_matches(|c: char| {
+                        c == '[' || c == ']' || c == '"' || c == '\'' || c.is_whitespace()
+                    })
+                })
+                .any(|clean_tag| clean_tag == t.as_str())
+        });
+        text_ok && include_ok && exclude_ok && tags_ok
+    }
 }
 
 fn parse_terms(input: &str) -> Vec<String> {
@@ -164,7 +133,60 @@ fn parse_terms(input: &str) -> Vec<String> {
         .collect()
 }
 
+fn recipe_detail(recipes: &[Recipe], id: i32) -> Element<'_, Message> {
+    let back = button(text("Back to results")).on_press(Message::BackToResults);
+
+    let content = match recipes.iter().find(|r| r.id == id) {
+        Some(recipe) => column![
+            text(recipe.name.as_str()).size(26),
+            text("Ingredients").size(18),
+            text(recipe.ingredients.as_str()).size(14),
+            text("Instructions").size(18),
+            text(recipe.instructions.as_str()).size(14),
+            text("Tags").size(18),
+            text(recipe.tags.as_str()).size(14),
+        ]
+        .spacing(10)
+        .width(Length::Fill),
+        None => column![text("Recipe not found")],
+    };
+
+    scrollable(column![back, content].spacing(16).padding(20))
+        .width(Length::Fill)
+        .into()
+}
+
 impl App {
+    fn new() -> (Self, Task<Message>) {
+        let app = Self {
+            db: None,
+            tab: Tab::default(),
+            loading: true,
+            error: None,
+            recipes: Vec::new(),
+            my_recipes: Vec::new(),
+            search: String::new(),
+            show_advanced: false,
+            selected: None,
+            page: 0,
+            include_input: String::new(),
+            exclude_input: String::new(),
+            tags_input: String::new(),
+            selected_saved: None,
+            new_name: String::new(),
+            new_ingredients: text_editor::Content::new(),
+            new_directions: text_editor::Content::new(),
+            new_tags: String::new(),
+            status: None,
+        };
+
+        let task = Task::perform(
+            db_backend::startup("recipes.sqlite".to_string()),
+            Message::Loaded,
+        );
+        (app, task)
+    }
+
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Loaded(result) => {
@@ -265,6 +287,7 @@ impl App {
 
         Task::none()
     }
+
     fn view(&self) -> Element<'_, Message> {
         let content = match self.tab {
             Tab::Search => self.search_view(),
@@ -287,12 +310,10 @@ impl App {
                 .on_press(Message::TabSelected(tab))
                 .width(Length::Fill)
                 .style(if self.tab == tab {
-                        button::primary
-                    } 
-                    else {
-                        button::secondary
-                    }
-                )  
+                    button::primary
+                } else {
+                    button::secondary
+                })
         };
 
         container(
@@ -308,66 +329,6 @@ impl App {
         .height(Length::Fill)
         .style(container::bordered_box)
         .into()
-    }
-
-    fn create_view(&self) -> Element<'_, Message> {
-        let can_submit = self.db.is_some() && !self.new_name.trim().is_empty();
-
-        let mut form = column![
-            text("New recipe").size(26),
-            text("Name").size(14),
-            text_input("Recipe name", &self.new_name)
-                .on_input(Message::NameEdited)
-                .padding(8),
-            text("Ingredients").size(14),
-            text_editor(&self.new_ingredients)
-                .placeholder("One per line")
-                .on_action(Message::IngredientsEdited)
-                .height(Length::Fixed(160.0)),
-            text("Directions").size(14),
-            text_editor(&self.new_directions)
-                .placeholder("Steps...")
-                .on_action(Message::DirectionsEdited)
-                .height(Length::Fixed(220.0)),
-            text("Tags").size(14),
-            text_input("e.g. vegan, dessert", &self.new_tags)
-                .on_input(Message::NewTagsEdited)
-                .padding(8),
-            button(text("Save recipe")).on_press_maybe(can_submit.then_some(Message::SubmitRecipe)),
-        ]
-        .spacing(8)
-        .padding(20);
-
-        if let Some(status) = &self.status {
-            form = form.push(text(status.as_str()).size(14));
-        }
-
-        scrollable(form).width(Length::Fill).into()
-    }
-
-    fn saved_view(&self) -> Element<'_, Message> {
-        match self.selected_saved {
-            Some(id) => recipe_detail(&self.my_recipes, id),
-            None => {
-                let mut list = column![
-                    text(format!("{} saved recipes", self.my_recipes.len())).size(14)
-                ]
-                .spacing(16)
-                .padding(20);
-
-                // newest first
-                for recipe in self.my_recipes.iter().rev() {
-                    list = list.push(
-                      button(text(recipe.name.as_str()).size(18))
-                        .on_press(Message::RecipeSelected(recipe.id))
-                        .width(Length::Fill)
-                        .style(button::secondary),
-                    );
-                }
-
-                scrollable(list).width(Length::Fill).height(Length::Fill).into()
-            }
-        }
     }
 
     fn search_view(&self) -> Element<'_, Message> {
@@ -413,30 +374,27 @@ impl App {
 
         if self.loading {
             list = list.push(text("Loading recipes...").size(14));
-        } 
-        else if let Some(err) = &self.error {
+        } else if let Some(err) = &self.error {
             list = list.push(text(format!("Failed to load recipes: {err}")).size(14));
-        } 
-        else if filters.is_empty() {
+        } else if filters.is_empty() {
             list = list.push(
-            text(format!(
-                "{} recipes loaded — type to search ({} shown)",
-                self.recipes.len(),
-                page_items.len()
-            ))
-            .size(14),
+                text(format!(
+                    "{} recipes loaded — type to search ({} shown)",
+                    self.recipes.len(),
+                    page_items.len()
+                ))
+                .size(14),
             );
-        } 
-        else {
+        } else {
             list = list.push(text(format!("{} matches", total_matches)).size(14));
         }
 
         for recipe in page_items {
             list = list.push(
-            button(text(recipe.name.as_str()).size(18))
-                .on_press(Message::RecipeSelected(recipe.id))
-                .width(Length::Fill)
-                .style(button::secondary),
+                button(text(recipe.name.as_str()).size(18))
+                    .on_press(Message::RecipeSelected(recipe.id))
+                    .width(Length::Fill)
+                    .style(button::secondary),
             );
         }
 
@@ -454,12 +412,15 @@ impl App {
         let results: Element<'_, Message> = match self.selected {
             Some(id) => recipe_detail(&self.recipes, id),
             None => column![
-                scrollable(list).id(RESULTS_ID).width(Length::Fill).height(Length::Fill),
+                scrollable(list)
+                    .id(RESULTS_ID)
+                    .width(Length::Fill)
+                    .height(Length::Fill),
                 nav,
             ]
-        .spacing(10)
-        .width(Length::Fill)
-        .into(),
+            .spacing(10)
+            .width(Length::Fill)
+            .into(),
         };
         body = body.push(results);
 
@@ -483,7 +444,7 @@ impl App {
             .padding(8);
 
         container(
-    column![
+            column![
                 text("Advanced search").size(18),
                 text("Must include").size(14),
                 include,
@@ -499,28 +460,66 @@ impl App {
         .style(container::bordered_box)
         .into()
     }
-}
 
-fn recipe_detail(recipes: &[Recipe], id: i32) -> Element<'_, Message> {
-    let back = button(text("Back to results")).on_press(Message::BackToResults);
+    fn create_view(&self) -> Element<'_, Message> {
+        let can_submit = self.db.is_some() && !self.new_name.trim().is_empty();
 
-    let content = match recipes.iter().find(|r| r.id == id) {
-        Some(recipe) => column![
-            text(recipe.name.as_str()).size(26),
-            text("Ingredients").size(18),
-            text(recipe.ingredients.as_str()).size(14),
-            text("Instructions").size(18),
-            text(recipe.instructions.as_str()).size(14),
-            text("Tags").size(18),
-            text(recipe.tags.as_str()).size(14),
+        let mut form = column![
+            text("New recipe").size(26),
+            text("Name").size(14),
+            text_input("Recipe name", &self.new_name)
+                .on_input(Message::NameEdited)
+                .padding(8),
+            text("Ingredients").size(14),
+            text_editor(&self.new_ingredients)
+                .placeholder("One per line")
+                .on_action(Message::IngredientsEdited)
+                .height(Length::Fixed(160.0)),
+            text("Directions").size(14),
+            text_editor(&self.new_directions)
+                .placeholder("Steps...")
+                .on_action(Message::DirectionsEdited)
+                .height(Length::Fixed(220.0)),
+            text("Tags").size(14),
+            text_input("e.g. vegan, dessert", &self.new_tags)
+                .on_input(Message::NewTagsEdited)
+                .padding(8),
+            button(text("Save recipe")).on_press_maybe(can_submit.then_some(Message::SubmitRecipe)),
         ]
-        .spacing(10)
-        .width(Length::Fill),
-        None => column![text("Recipe not found")],
-    };
+        .spacing(8)
+        .padding(20);
 
-    scrollable(column![back, content].spacing(16).padding(20))
-        .width(Length::Fill)
-        .into()
+        if let Some(status) = &self.status {
+            form = form.push(text(status.as_str()).size(14));
+        }
+
+        scrollable(form).width(Length::Fill).into()
+    }
+
+    fn saved_view(&self) -> Element<'_, Message> {
+        match self.selected_saved {
+            Some(id) => recipe_detail(&self.my_recipes, id),
+            None => {
+                let mut list = column![text(format!("{} saved recipes", self.my_recipes.len()))
+                    .size(14)]
+                .spacing(16)
+                .padding(20);
+
+                // newest first
+                for recipe in self.my_recipes.iter().rev() {
+                    list = list.push(
+                        button(text(recipe.name.as_str()).size(18))
+                            .on_press(Message::RecipeSelected(recipe.id))
+                            .width(Length::Fill)
+                            .style(button::secondary),
+                    );
+                }
+
+                scrollable(list)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into()
+            }
+        }
+    }
 }
-
