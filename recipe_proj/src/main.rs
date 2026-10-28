@@ -406,9 +406,7 @@ impl App {
         .spacing(10);
 
         let mut body = row![].spacing(10);
-        if self.show_advanced {
-            body = body.push(self.advanced_panel());
-        }
+
         let results: Element<'_, Message> = match self.selected {
             Some(id) => recipe_detail(&self.recipes, id),
             None => column![
@@ -423,7 +421,9 @@ impl App {
             .into(),
         };
         body = body.push(results);
-
+        if self.show_advanced {
+            body = body.push(self.advanced_panel());
+        }
         container(column![search_row, body].spacing(10).padding(20))
             .width(Length::Fill)
             .height(Length::Fill)
