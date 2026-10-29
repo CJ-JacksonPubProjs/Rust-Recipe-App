@@ -2,7 +2,7 @@ use crate::db_backend::Recipe;
 use iced::widget::{button, column, container, row, scrollable, text, text_input};
 use iced::{Element, Length};
 
-use crate::app::{parse_terms, App, Filters, Message};
+use crate::app::{parse_terms, App, Filters, Message,RecipeOrigin};
 use crate::views::recipe_detail;
 
 pub const MAX_RESULTS: usize = 50;
@@ -83,7 +83,7 @@ impl App {
         let mut body = row![].spacing(10);
 
         let results: Element<'_, Message> = match self.selected {
-            Some(id) => recipe_detail(&self.recipes, id),
+            Some(id) => recipe_detail(&self.recipes, id, RecipeOrigin::Search),
             None => column![
                 scrollable(list)
                     .id(RESULTS_ID)

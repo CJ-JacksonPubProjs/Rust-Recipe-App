@@ -108,6 +108,19 @@ impl Database {
             .await
             .map_err(|e| e.to_string())
     }
+
+    pub async fn delete_recipe(&self, id: i32) -> Result<(), String> {
+        self.conn
+            .call(move |conn| -> rusqlite::Result<()> {
+                conn.execute(
+                    "DELETE FROM my_recipes WHERE id = ?1",
+                    rusqlite::params![id],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(|e| e.to_string())
+    }
 }
 
 /// Everything the app needs at startup.

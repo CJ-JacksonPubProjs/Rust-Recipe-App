@@ -1,13 +1,13 @@
 use iced::widget::{button, column, scrollable, text};
 use iced::{Element, Length};
 
-use crate::app::{App, Message};
+use crate::app::{App, Message,RecipeOrigin};
 use crate::views::recipe_detail;
 
 impl App {
     pub fn saved_view(&self) -> Element<'_, Message> {
         match self.selected_saved {
-            Some(id) => recipe_detail(&self.my_recipes, id),
+            Some(id) => recipe_detail(&self.my_recipes, id, RecipeOrigin::Saved),
             None => {
                 let mut list = column![text(format!("{} saved recipes", self.my_recipes.len()))
                     .size(14)]

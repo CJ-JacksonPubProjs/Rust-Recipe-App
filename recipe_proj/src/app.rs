@@ -13,6 +13,11 @@ pub enum Tab {
     Saved,
 }
 
+pub enum RecipeOrigin {
+    Search,
+    Saved,
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
     Loaded(Result<Loaded, String>),
@@ -35,6 +40,12 @@ pub enum Message {
     NewTagsEdited(String),
     SubmitRecipe,
     RecipeSaved(Result<Vec<Recipe>, String>),
+    //different detailed view messages dependent on RecipeOrigin
+    SaveRecipe(i32),
+    DeleteRecipe(i32),
+    // Async database callbacks
+    RecipeSavedToList(Result<Vec<Recipe>, String>),
+    RecipeDeletedFromList(Result<Vec<Recipe>, String>),
 }
 
 pub struct Filters {
@@ -170,7 +181,8 @@ impl App {
                     }
                 }
             }
-
+            
+            //handles tab navigation
             Message::TabSelected(tab) => self.tab = tab,
 
             // search tab
@@ -212,6 +224,73 @@ impl App {
             Message::BackToResults => match self.tab {
                 Tab::Saved => self.selected_saved = None,
                 _ => self.selected = None,
+            },
+
+            //controls save/delete for search + saved
+            Message::SaveRecipe(id) => {
+                let Some(db) = self.db.clone() else {
+                    return Task::none();
+                };
+
+                let Some(recipe) = self.recipes.iter().find(|r| r.id == id).cloned() else {
+                    return Task::none();
+                };
+
+                self.status = Some("Saving recipe...".to_string());
+
+                return Task::perform(
+                    async move {
+                        // Reusing your existing add_recipe method
+                        db.add_recipe(
+                            recipe.name,
+                            recipe.ingredients,
+                            recipe.instructions, // or directions depending on your struct field
+                            recipe.tags,
+                        )
+                        .await?;
+
+                        // Reusing your existing load_my_recipes method
+                        db.load_my_recipes().await
+                    },
+                    Message::RecipeSavedToList,
+                );
+        }
+
+            Message::RecipeSavedToList(result) => match result {
+                Ok(updated_list) => {
+                    self.my_recipes = updated_list;
+                    self.status = Some("Recipe saved to your list!".to_string());
+                }
+                Err(err) => {
+                    self.status = Some(format!("Failed to save recipe: {err}"));
+                }
+            },
+
+            Message::DeleteRecipe(id) => {
+                let Some(db) = self.db.clone() else {
+                    return Task::none();
+                };
+
+                self.status = Some("Deleting recipe...".to_string());
+
+                return Task::perform(
+                    async move {
+                        db.delete_recipe(id).await?;
+                        db.load_my_recipes().await
+                    },
+                    Message::RecipeDeletedFromList,
+                );
+            }
+
+            Message::RecipeDeletedFromList(result) => match result {
+                Ok(updated_list) => {
+                    self.my_recipes = updated_list;
+                    self.selected_saved = None; // Reset detail view back to list view
+                    self.status = Some("Recipe deleted from your list.".to_string());
+                }
+                Err(err) => {
+                    self.status = Some(format!("Failed to delete recipe: {err}"));
+                }
             },
 
             // create tab
