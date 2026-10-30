@@ -1,4 +1,5 @@
 use tokio_rusqlite::{rusqlite, Connection};
+use tokio_rusqlite::rusqlite::OptionalExtension;
 
 #[derive(Debug, Clone)]
 pub struct Recipe {
@@ -60,7 +61,11 @@ impl Database {
                         ingredients TEXT NOT NULL,
                         directions TEXT NOT NULL,
                         tags TEXT
-                    )",
+                    );
+                    CREATE TABLE IF NOT EXISTS settings (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL
+                    );",
                 )?;
                 Ok(())
             })
@@ -121,6 +126,34 @@ impl Database {
             .await
             .map_err(|e| e.to_string())
     }
+
+    pub async fn get_setting(&self, key: &'static str) -> Result<Option<String>, String> {
+    self.conn
+        .call(move |conn| -> rusqlite::Result<Option<String>> {
+            conn.query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                rusqlite::params![key],
+                |row| row.get(0),
+            )
+            .optional()
+        })
+        .await
+        .map_err(|e| e.to_string())
+    }
+
+    pub async fn set_setting(&self, key: &'static str, value: String) -> Result<(), String> {
+        self.conn
+            .call(move |conn| -> rusqlite::Result<()> {
+                conn.execute(
+                    "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    rusqlite::params![key, value],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(|e| e.to_string())
+    }
 }
 
 /// Everything the app needs at startup.
@@ -129,11 +162,13 @@ pub struct Loaded {
     pub db: Database,
     pub recipes: Vec<Recipe>,
     pub my_recipes: Vec<Recipe>,
+    pub theme: Option<String>,
 }
 
 pub async fn startup(path: String) -> Result<Loaded, String> {
     let db = Database::open(&path).await?;
     let recipes = db.load_recipes().await?;
     let my_recipes = db.load_my_recipes().await?;
-    Ok(Loaded { db, recipes, my_recipes })
+    let theme = db.get_setting("theme").await?;
+    Ok(Loaded { db, recipes, my_recipes, theme })
 }

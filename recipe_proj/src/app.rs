@@ -1,9 +1,11 @@
-use crate::db_backend::{Database, Loaded, Recipe};
+use iced::Theme;
 use iced::widget::operation::{self, RelativeOffset};
 use iced::widget::{button, column, container, row, text, text_editor};
 use iced::{Element, Length, Task};
 
 use crate::views::search_recipes::RESULTS_ID;
+use crate::db_backend::{Database, Loaded, Recipe};
+use crate::views::recipe_detailed_view::format_list;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Tab {
@@ -11,6 +13,7 @@ pub enum Tab {
     Search,
     Create,
     Saved,
+    Settings,
 }
 
 pub enum RecipeOrigin {
@@ -22,6 +25,9 @@ pub enum RecipeOrigin {
 pub enum Message {
     Loaded(Result<Loaded, String>),
     TabSelected(Tab),
+    // settings tab
+    ThemeChanged(Theme),
+    ThemeSaved(Result<(), String>),
     // search tab
     SearchChanged(String),
     ToggleAdvanced,
@@ -46,6 +52,8 @@ pub enum Message {
     // Async database callbacks
     RecipeSavedToList(Result<Vec<Recipe>, String>),
     RecipeDeletedFromList(Result<Vec<Recipe>, String>),
+    // saved tab
+    SavedSearchChanged(String),
 }
 
 pub struct Filters {
@@ -110,6 +118,7 @@ pub struct App {
     pub tab: Tab,
     pub loading: bool,
     pub error: Option<String>,
+    pub theme: Theme,
 
     pub recipes: Vec<Recipe>,
     pub my_recipes: Vec<Recipe>,
@@ -125,6 +134,7 @@ pub struct App {
 
     // saved tab
     pub selected_saved: Option<i32>,
+    pub saved_search: String,
 
     // create tab
     pub new_name: String,
@@ -156,6 +166,8 @@ impl App {
             new_directions: text_editor::Content::new(),
             new_tags: String::new(),
             status: None,
+            theme: Theme::TokyoNight,
+            saved_search: String::new(),
         };
 
         let task = Task::perform(
@@ -165,12 +177,21 @@ impl App {
         (app, task)
     }
 
+    pub fn theme(&self) -> Theme {
+        self.theme.clone()
+    }
+
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Loaded(result) => {
                 self.loading = false;
                 match result {
                     Ok(loaded) => {
+                        if let Some(name) = &loaded.theme {
+                            if let Some(theme) = Theme::ALL.iter().find(|t| t.to_string() == *name) {
+                                self.theme = theme.clone();
+                            }
+                        }
                         self.db = Some(loaded.db);
                         self.recipes = loaded.recipes;
                         self.my_recipes = loaded.my_recipes;
@@ -185,6 +206,25 @@ impl App {
             //handles tab navigation
             Message::TabSelected(tab) => self.tab = tab,
 
+            // settings tab
+            Message::ThemeChanged(theme) => {
+                self.theme = theme.clone();
+
+                let Some(db) = self.db.clone() else {
+                    return Task::none();
+                };
+
+                return Task::perform(
+                    async move { db.set_setting("theme", theme.to_string()).await },
+                    Message::ThemeSaved,
+                );
+            }
+
+            Message::ThemeSaved(result) => {
+                if let Err(err) = result {
+                    eprintln!("Failed to save theme: {err}");
+                }
+            }
             // search tab
             Message::SearchChanged(value) => {
                 self.search = value;
@@ -240,16 +280,14 @@ impl App {
 
                 return Task::perform(
                     async move {
-                        // Reusing your existing add_recipe method
                         db.add_recipe(
                             recipe.name,
-                            recipe.ingredients,
-                            recipe.instructions, // or directions depending on your struct field
+                            format_list(&recipe.ingredients),
+                            format_list(&recipe.instructions),
                             recipe.tags,
                         )
                         .await?;
 
-                        // Reusing your existing load_my_recipes method
                         db.load_my_recipes().await
                     },
                     Message::RecipeSavedToList,
@@ -329,6 +367,12 @@ impl App {
                 }
                 Err(err) => self.status = Some(format!("Failed to save: {err}")),
             },
+
+            // saved tab
+            Message::SavedSearchChanged(value) => {
+                self.saved_search = value;
+                self.selected_saved = None;
+            }
         }
 
         Task::none()
@@ -339,6 +383,7 @@ impl App {
             Tab::Search => self.search_view(),
             Tab::Create => self.create_view(),
             Tab::Saved => self.saved_view(),
+            Tab::Settings => self.settings_view(),
         };
 
         row![
@@ -367,6 +412,7 @@ impl App {
                 tab_button("New recipe", Tab::Create),
                 tab_button("Search", Tab::Search),
                 tab_button("My recipes", Tab::Saved),
+                tab_button("Settings", Tab::Settings),
             ]
             .spacing(8)
             .padding(10),
